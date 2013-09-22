@@ -11,7 +11,11 @@ use File::Basename;
 my %sizes; # meme base image sizes
 my %acros; # meme base acronyms (BLB => bad-luck-brian.jpg)
 
-my $script_path = $ENV{'SCRIPT_FILENAME'} ? dirname($ENV{'SCRIPT_FILENAME'}) : dirname($0);
+# Are we running as CGI or from the command-line?
+# TODO better detection
+my $is_cgi = $ENV{'SCRIPT_FILENAME'};
+
+my $script_path =  $is_cgi ? dirname($ENV{'SCRIPT_FILENAME'}) : dirname($0);
 
 my $sz_fname = $script_path . '/meme-sizes.lst';
 
@@ -44,6 +48,8 @@ while (my $line = <FILE>) {
 	}
 }
 
+my %revacros = reverse %acros;
+
 close FILE;
 
 
@@ -61,48 +67,34 @@ width='%2\$d' height='%3\$d'/>
 %4\$s</svg>
 SVG
 
-# template: y-pos, font-size, text
+sub fill_svg($$$$) {
+	return sprintf($svg_template, @_);
+}
+
+# params: y-pos, font-size, text
+
 my $txt_template=<<TXT;
 <text x='50%%' y='%1\$d%%' font-size='%2\$d'
 >%3\$s</text>
 TXT
 
-while (my $q = new CGI::Fast) {
-	my $img = $q->param('m') || (keys %sizes)[0];
-	if (!defined $sizes{$img}) {
-		if (!defined $acros{$img}) {
-			print $q->header(-status=>404),
-			$q->start_html("Unknown meme base"),
-			$q->h1("Unknown meme base!");
-			print	"<p>Sorry, <tt>'" . encode_entities($img) . "'</tt> is not a known meme base. ".
-			"You want one of the following instead:</p><ul>";
-			my %revacros = reverse %acros;
-			foreach (keys %sizes) {
-				print "<li><tt>" . encode_entities($_) . "</tt>";
-				print " (<tt>" . encode_entities($revacros{$_}) . "</tt>)" if defined $revacros{$_};
-				print "</tt></li>";
-			}
-			print "</ul>";
-			# foreach (keys %ENV) {
-			# 	print "<p>$_=$ENV{$_}</p>"
-			# }
-			print $q->end_html();
-			next;
-		} else {
-			$img = $acros{$img};
-		}
+sub fill_txt($$$) {
+	return sprintf($txt_template, @_);
+}
+
+# routine to actually prepare the SVG.
+# params: img, sep, text
+sub make_svg($$@) {
+	my $img = shift;
+	my $sep = shift;
+	my @t   = @_;
+
+	unless (defined $img and defined $sizes{$img}) {
+		return undef unless defined $img and defined $acros{$img};
+		$img = $acros{$img};
 	}
 
-	print $q->header(
-		-type => 'image/svg+xml',
-		-charset => 'UTF-8'
-	);
-
 	my ($width, $height) = @{$sizes{$img}};
-
-	my $sep = $q->param('s') || '/'; # line separator
-
-	my @t = $q->param('t') || ('TEST TOP//TEST BOTTOM');
 
 	my $divisions = 7;
 	my @lines = ();
@@ -133,8 +125,67 @@ while (my $q = new CGI::Fast) {
 			next;
 		}
 		$dy += $offset;
-		$txt .= sprintf($txt_template, $dy, $fontsize, $_);
+		$txt .= fill_txt($dy, $fontsize, $_);
 	}
 
-	printf($svg_template, $img, $width, $height, $txt);
+	return fill_svg($img, $width, $height, $txt);
+}
+
+my ($img, $sep, @t); # image, line separator, text lines
+
+while (my $q = new CGI::Fast) {
+
+	if ($is_cgi) {
+		$img = $q->param('m');
+		$sep = $q->param('s');
+		@t = $q->param('t');
+	} else {
+		($img, $sep, @t) = @ARGV;
+	}
+
+	$img ||= (keys %sizes)[0];
+	$sep ||= '/';
+	@t = ('TOP TEST//BOTTOM TEST') unless @t;
+
+	my $svg = make_svg($img, $sep, @t);
+
+	if (defined $svg) {
+		print $q->header(
+			-type => 'image/svg+xml',
+			-charset => 'UTF-8'
+		) if $is_cgi;
+
+		print $svg;
+
+		next if $is_cgi;
+		exit 0;
+	}
+
+	# missing meme
+	if ($is_cgi) {
+		print $q->header(-status=>404),
+		$q->start_html("Unknown meme base"),
+		$q->h1("Unknown meme base!");
+		print	"<p>Sorry, <tt>'" . encode_entities($img) . "'</tt> is not a known meme base. ".
+		"You want one of the following instead:</p><ul>";
+		my %revacros = reverse %acros;
+		foreach (keys %sizes) {
+			print "<li><tt>" . encode_entities($_) . "</tt>";
+			print " (<tt>" . encode_entities($revacros{$_}) . "</tt>)" if defined $revacros{$_};
+			print "</tt></li>";
+		}
+		print "</ul>";
+		# foreach (keys %ENV) {
+		# 	print "<p>$_=$ENV{$_}</p>"
+		# }
+		print $q->end_html();
+		next;
+	} else {
+		foreach (keys %sizes) {
+			print STDERR "* $_";
+			print STDERR " ($revacros{$_})" if defined $revacros{$_};
+			print STDERR "\n";
+		}
+		exit -1;
+	}
 }
