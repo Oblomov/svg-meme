@@ -107,7 +107,6 @@ sub make_svg($@) {
 
 	$p{sep} = qr/\Q$p{sep}\E/;
 
-	$p{fs} = ['90//'];
 	my @fss; # line-specific font sizes. Kill non-numeric values
 	foreach (@{$p{fs}}) {
 		foreach (split($p{sep}, $_, -1)) {
@@ -138,39 +137,65 @@ sub make_svg($@) {
 		}
 	}
 
-	# TODO adjust filler size when some lines have different heights
-	my $offset = int(100/$divisions + 0.5);
-	my $fillers = grep { $_ eq '' } @lines;
-	my $real_lines = @lines - $fillers;
-	my $filler_size = $fillers ? int((98 - $offset*$real_lines)/$fillers) : 0;
+	# formatted lines: each element is a ref to an array with the following elements:
+	#  * line text (undef for empty line),
+	#  * font size (undef for empty line or default font),
+	#  * y increment (always defined)
 
-	# zip @lines and @fss, removing default font-sizes from @fss
-	if (@fss == 1) {
-		@fss = ();
-	} else {
-		@fss = map { $_ eq '' || $_ == $p{fs} ? undef : $_ } @fss;
+	my @fmt_lines;
+	my $total_height = 0; # total height of real lines
+	my $fillers = 0; # number of fillers
+	for (my $i = 0; $i < @lines; ++$i) {
+		my $line = $lines[$i];
+		my $fs = $fss[$i];
+		my $lh = undef;
+		if (defined $line and $line eq '') {
+			$line = undef;
+			++$fillers;
+		}
+		# let's have an actually defined font-size for purposes of height
+		# computation
+		if (!defined $fs or $fs eq '') {
+			$fs = $p{fs};
+		}
+		if (defined $line) {
+			$lh = int(100*$fs/$p{height} + 0.5);
+			$total_height += $lh;
+		}
+		# undefine $fs if not needed
+		if (!defined $line or $fs == $p{fs}) {
+			$fs = undef;
+		}
+		push @fmt_lines, [$line, $fs, $lh];
+	}
+	my $filler_size = $fillers? int((98 - $total_height)/$fillers) : 0;
+
+	if ($filler_size) {
+		foreach (@fmt_lines) {
+			$_->[2] = $filler_size unless defined $_->[2];
+		}
 	}
 
 	$p{y} = 0;
 	$p{text} = '';
 	# iterate over both @lines and @fss. I'm sure there's a more perlish
 	# way to do it
-	for (my $i = 0; $i < @lines; ++$i) {
-		my $line = $lines[$i];
-		my $fs = $fss[$i];
-		if ($line eq '') {
-			$p{y} += $filler_size;
-			next;
-		}
+	foreach (@fmt_lines) {
+		my $line = $_->[0];
+		my $fs = $_->[1];
+		my $lh = $_->[2];
+
+		$p{y} += $lh;
+		next unless defined $line; #fillers just increment y
+
 		if (not defined $fs) {
 			$p{linefs} = '';
-			$p{y} += $offset;
 		} else {
 			# Damn, apparently attribute font-size does not ovverride style
 			# $p{linefs} = " font-size='$fs'";
 			$p{linefs} = " style='font-size:${fs}px'";
-			$p{y} += int(100*$fs/$p{height});
 		}
+
 		$p{text} .= fill_txt($line, %p);
 	}
 
