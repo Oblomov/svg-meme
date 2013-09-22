@@ -4,5 +4,7 @@
 #
 # This file is read by the SVG meme generator to gather information
 # about known meme bases.
+#
+# Pubic domain
 
 identify -format "%w %h %f\n" *.jpg > meme-sizes.lst

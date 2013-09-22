@@ -1,5 +1,10 @@
 #!/usr/bin/perl -w
 
+# SVG meme generator
+# Copyright (C) 2013 Giuseppe Bilotta
+# Distributed under the terms of the Artistic License,
+# see 'Artistic' in the repository root.
+
 use strict;
 
 use CGI::Fast;
