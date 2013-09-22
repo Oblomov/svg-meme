@@ -8,6 +8,8 @@ use HTML::Entities;
 
 use File::Basename;
 
+use Scalar::Util qw(looks_like_number);
+
 my %sizes; # meme base image sizes
 my %acros; # meme base acronyms (BLB => bad-luck-brian.jpg)
 
@@ -53,7 +55,7 @@ my %revacros = reverse %acros;
 close FILE;
 
 
-# params: img, width, height, text
+# params: img, width, height, font-size, text
 
 my $svg_template=<<SVG;
 <?xml version='1.0' encoding='UTF-8'?>
@@ -61,29 +63,32 @@ my $svg_template=<<SVG;
  xmlns='http://www.w3.org/2000/svg'
  xmlns:xlink='http://www.w3.org/1999/xlink' version='1.1'
  viewBox='0 0 %2\$d %3\$d'>
-<style type="text/css">text{font-family:'Impact';fill:white;stroke:black;stroke-width:2px;text-anchor:middle}</style>
+<style type="text/css">text{font-family:'Impact';font-size:%4\$dpx;fill:white;stroke:black;stroke-width:2px;text-anchor:middle}</style>
 <image xlink:href='%1\$s' x='0' y='0'
 width='%2\$d' height='%3\$d'/>
-%4\$s</svg>
+%5\$s</svg>
 SVG
 
 sub fill_svg(%) {
 	my %p = @_;
 	return sprintf($svg_template,
-		$p{img}, $p{width}, $p{height}, $p{text});
+		$p{img}, $p{width}, $p{height}, $p{fs}, $p{text});
 }
 
 # params: text, y-pos, font-size
+# the font-size presented here is optional, and should only be
+# present when this text line has a different font-size than
+# the default one
 
 my $txt_template=<<TXT;
-<text x='50%%' y='%2\$d%%' font-size='%3\$d'
+<text x='50%%' y='%2\$d%%'%3\$s
 >%1\$s</text>
 TXT
 
 sub fill_txt($%) {
 	my $text = shift;
 	my %p = @_;
-	return sprintf($txt_template, $text, $p{y}, $p{fs});
+	return sprintf($txt_template, $text, $p{y}, $p{linefs});
 }
 
 # routine to actually prepare the SVG.
@@ -100,38 +105,73 @@ sub make_svg($@) {
 
 	($p{width}, $p{height}) = @{$sizes{$p{img}}};
 
-	my $divisions = 7;
-	my @lines = ();
 	$p{sep} = qr/\Q$p{sep}\E/;
+
+	$p{fs} = ['90//'];
+	my @fss; # line-specific font sizes. Kill non-numeric values
+	foreach (@{$p{fs}}) {
+		foreach (split($p{sep}, $_, -1)) {
+			push @fss, looks_like_number($_) ? $_ : '';
+		}
+	}
+
+	my @lines; # text lines
 	foreach (@t) {
-		foreach (split $p{sep}) {
+		foreach (split($p{sep}, $_, -1)) {
 			push @lines, $_;
 		}
 	}
 
+	my $divisions = 7;
 	$divisions = @lines if @lines > $divisions;
 
-	# fontsize
-	$p{fs} = int($p{height}/$divisions + 0.5);
-	if ($p{fs} > $p{width}/10) {
-		$p{fs} = int($p{width}/10 + 0.5) if $p{fs} > $p{width}/10;
+	# if the user specified a single font-size, use that, otherwise
+	# compute a default one based on the number of divisions
+	if (@fss == 1) {
+		$p{fs} = $fss[0];
 		$divisions = int($p{height}/$p{fs} + 0.5);
+	} else {
+		$p{fs} = int($p{height}/$divisions + 0.5);
+		if ($p{fs} > $p{width}/10) {
+			$p{fs} = int($p{width}/10 + 0.5) if $p{fs} > $p{width}/10;
+			$divisions = int($p{height}/$p{fs} + 0.5);
+		}
 	}
 
+	# TODO adjust filler size when some lines have different heights
 	my $offset = int(100/$divisions + 0.5);
 	my $fillers = grep { $_ eq '' } @lines;
 	my $real_lines = @lines - $fillers;
 	my $filler_size = $fillers ? int((98 - $offset*$real_lines)/$fillers) : 0;
 
+	# zip @lines and @fss, removing default font-sizes from @fss
+	if (@fss == 1) {
+		@fss = ();
+	} else {
+		@fss = map { $_ eq '' || $_ == $p{fs} ? undef : $_ } @fss;
+	}
+
 	$p{y} = 0;
 	$p{text} = '';
-	foreach (@lines) {
-		if ($_ eq '') {
+	# iterate over both @lines and @fss. I'm sure there's a more perlish
+	# way to do it
+	for (my $i = 0; $i < @lines; ++$i) {
+		my $line = $lines[$i];
+		my $fs = $fss[$i];
+		if ($line eq '') {
 			$p{y} += $filler_size;
 			next;
 		}
-		$p{y} += $offset;
-		$p{text} .= fill_txt($_, %p);
+		if (not defined $fs) {
+			$p{linefs} = '';
+			$p{y} += $offset;
+		} else {
+			# Damn, apparently attribute font-size does not ovverride style
+			# $p{linefs} = " font-size='$fs'";
+			$p{linefs} = " style='font-size:${fs}px'";
+			$p{y} += int(100*$fs/$p{height});
+		}
+		$p{text} .= fill_txt($line, %p);
 	}
 
 	return fill_svg(%p);
@@ -145,7 +185,11 @@ while (my $q = new CGI::Fast) {
 		$p{img} = $q->param('m');
 		$p{sep} = $q->param('s');
 		@t = $q->param('t');
+		# ugh
+		my @fss = $q->param('fs');
+		$p{fs} = \@fss;
 	} else {
+		# TODO specify font-size from CLI
 		($p{img}, $p{sep}, @t) = @ARGV;
 	}
 
