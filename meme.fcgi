@@ -115,6 +115,11 @@ while (my $q = new CGI::Fast) {
 	$divisions = @lines if @lines > $divisions;
 
 	my $fontsize = int($height/$divisions + 0.5);
+	if ($fontsize > $width/10) {
+		$fontsize = int($width/10 + 0.5) if $fontsize > $width/10;
+		$divisions = int($height/$fontsize + 0.5);
+	}
+
 	my $offset = int(100/$divisions + 0.5);
 	my $fillers = grep { $_ eq '' } @lines;
 	my $real_lines = @lines - $fillers;
