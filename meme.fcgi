@@ -8,7 +8,8 @@ use HTML::Entities;
 
 use File::Basename;
 
-my %sizes;
+my %sizes; # meme base image sizes
+my %acros; # meme base acronyms (BLB => bad-luck-brian.jpg)
 
 my $script_path = $ENV{'SCRIPT_FILENAME'} ? dirname($ENV{'SCRIPT_FILENAME'}) : dirname($0);
 
@@ -21,6 +22,26 @@ while (my $line = <FILE>) {
 	next unless $line;
 	my ($width, $height, $fname) = split(/ /, $line, 3);
 	$sizes{$fname} = [$width, $height];
+
+	# Find a potential short form (acronym for multiword, no extension otherwise)
+	my $acro = '';
+
+	# remove article for the purpose of the shrotening; we don't care if it's
+	# in the middle of a word because we only care about initials anyway
+	# FIXME this actually fails in the case of XXXthe-XXX, let's care about that
+	# when we actually come across it
+	my $the = $fname;
+	$the =~ s/the-//g;
+	if ($the =~ /-/) {
+		$acro = join('', map { uc(substr($_, 0, 1)) } split(/-/, $the ));
+	} else {
+		$acro = (split(/\./, $the))[0]
+	}
+	if (!defined $acros{$acro}) {
+		$acros{$acro} = $fname;
+	} else {
+		print STDERR "Trying to redefined acronym $acro from $acros{$acro} to ${fname}\n";
+	}
 }
 
 close FILE;
@@ -49,20 +70,27 @@ TXT
 while (my $q = new CGI::Fast) {
 	my $img = $q->param('m') || (keys %sizes)[0];
 	if (!defined $sizes{$img}) {
-		print $q->header(-status=>404),
-		$q->start_html("Unknown meme base"),
-		$q->h1("Unknown meme base!");
-		print	"<p>Sorry, <tt>'" . encode_entities($img) . "'</tt> is not a known meme base. ".
+		if (!defined $acros{$img}) {
+			print $q->header(-status=>404),
+			$q->start_html("Unknown meme base"),
+			$q->h1("Unknown meme base!");
+			print	"<p>Sorry, <tt>'" . encode_entities($img) . "'</tt> is not a known meme base. ".
 			"You want one of the following instead:</p><ul>";
-		foreach (keys %sizes) {
-			print "<li><tt>" . encode_entities($_) . "</tt></li>";
+			my %revacros = reverse %acros;
+			foreach (keys %sizes) {
+				print "<li><tt>" . encode_entities($_) . "</tt>";
+				print " (<tt>" . encode_entities($revacros{$_}) . "</tt>)" if defined $revacros{$_};
+				print "</tt></li>";
+			}
+			print "</ul>";
+			# foreach (keys %ENV) {
+			# 	print "<p>$_=$ENV{$_}</p>"
+			# }
+			print $q->end_html();
+			next;
+		} else {
+			$img = $acros{$img};
 		}
-		print "</ul>";
-		# foreach (keys %ENV) {
-		# 	print "<p>$_=$ENV{$_}</p>"
-		# }
-		print $q->end_html();
-		next;
 	}
 
 	print $q->header(
