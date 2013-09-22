@@ -98,10 +98,8 @@ sub fill_txt($%) {
 
 # routine to actually prepare the SVG.
 # params: img, sep, text
-sub make_svg($@) {
-	my $pref = shift;
-	my %p = %{$pref};
-	my @t   = @_;
+sub make_svg(%) {
+	my %p = @_;
 
 	unless (defined $sizes{$p{img}}) {
 		return undef unless defined $acros{$p{img}};
@@ -112,18 +110,29 @@ sub make_svg($@) {
 
 	$p{sep} = qr/\Q$p{sep}\E/;
 
-	my @fss; # line-specific font sizes. Kill non-numeric values
-	foreach (@{$p{fs}}) {
-		foreach (split($p{sep}, $_, -1)) {
+	# font size specification is default:line/per/line/override
+	# Non-numeric values are skipped
+	my $fs_override;
+	my @fss; # array of font-size overrides
+
+	($p{fs}, $fs_override) = split(/:/, $p{fs},2);
+	if (defined $p{fs} and $p{fs} =~ $p{sep}) {
+		# there's a / in the default part. is this because there is no override part?
+		if (!defined $fs_override) {
+			$fs_override = $p{fs};
+		}
+		$p{fs} = undef;
+	}
+
+	if (defined $fs_override) {
+		foreach (split($p{sep}, $fs_override, -1)) {
 			push @fss, looks_like_number($_) ? $_ : '';
 		}
 	}
 
 	my @lines; # text lines
-	foreach (@t) {
-		foreach (split($p{sep}, $_, -1)) {
-			push @lines, $_;
-		}
+	foreach (split($p{sep}, $p{text}, -1)) {
+		push @lines, $_;
 	}
 
 	my $divisions = 7;
@@ -131,8 +140,7 @@ sub make_svg($@) {
 
 	# if the user specified a single font-size, use that, otherwise
 	# compute a default one based on the number of divisions
-	if (@fss == 1) {
-		$p{fs} = $fss[0];
+	if (defined $p{fs} and $p{fs}) {
 		$divisions = int($p{height}/$p{fs} + 0.5);
 	} else {
 		$p{fs} = int($p{height}/$divisions + 0.5);
@@ -207,27 +215,30 @@ sub make_svg($@) {
 	return fill_svg(%p);
 }
 
-my (%p, @t);
+my %p;
 
 while (my $q = new CGI::Fast) {
+
+	my (@t, @fs);
 
 	if ($is_cgi) {
 		$p{img} = $q->param('m');
 		$p{sep} = $q->param('s');
+		@fs = $q->param('fs');
 		@t = $q->param('t');
-		# ugh
-		my @fss = $q->param('fs');
-		$p{fs} = \@fss;
 	} else {
 		# TODO specify font-size from CLI
 		($p{img}, $p{sep}, @t) = @ARGV;
 	}
 
-	$p{img} ||= (keys %sizes)[0];
 	$p{sep} ||= '/';
-	@t = ('TOP TEST//BOTTOM TEST') unless @t;
+	$p{fs} = join($p{sep}, @fs);
+	$p{text} = join($p{sep}, @t);
 
-	my $svg = make_svg(\%p, @t);
+	$p{img} ||= (keys %sizes)[0];
+	$p{text}||= 'TOP TEST//BOTTOM TEST';
+
+	my $svg = make_svg(%p);
 
 	if (defined $svg) {
 		print $q->header(
