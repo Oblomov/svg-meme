@@ -16,7 +16,7 @@ use File::Basename;
 use Scalar::Util qw(looks_like_number);
 
 my %sizes; # meme base image sizes
-my %acros; # meme base acronyms (BLB => bad-luck-brian.jpg)
+my (%acros, %revacros); # meme base acronyms (BLB => bad-luck-brian.jpg) and reverse
 
 # Are we running as CGI or from the command-line?
 # TODO better detection
@@ -26,38 +26,39 @@ my $script_path =  $is_cgi ? dirname($ENV{'SCRIPT_FILENAME'}) : dirname($0);
 
 my $sz_fname = $script_path . '/meme-sizes.lst';
 
-open FILE, $sz_fname or die $!;
+sub load_sizes() {
+	open FILE, $sz_fname or die $!;
 
-while (my $line = <FILE>) {
-	chomp($line);
-	next unless $line;
-	my ($width, $height, $fname) = split(/ /, $line, 3);
-	$sizes{$fname} = [$width, $height];
+	while (my $line = <FILE>) {
+		chomp($line);
+		next unless $line;
+		my ($width, $height, $fname) = split(/ /, $line, 3);
+		$sizes{$fname} = [$width, $height];
 
-	# Find a potential short form (acronym for multiword, no extension otherwise)
-	my $acro = '';
+		# Find a potential short form (acronym for multiword, no extension otherwise)
+		my $acro = '';
 
-	# remove article for the purpose of the shortening; we don't care if it's
-	# in the middle of a word because we only care about initials anyway
-	# FIXME this actually fails in the case of XXXthe-XXX, let's care about that
-	# when we actually come across it
-	my $the = $fname;
-	$the =~ s/the-//g;
-	if ($the =~ /-/) {
-		$acro = join('', map { uc(substr($_, 0, 1)) } split(/-/, $the ));
-	} else {
-		$acro = (split(/\./, $the))[0]
+		# remove article for the purpose of the shortening; we don't care if it's
+		# in the middle of a word because we only care about initials anyway
+		# FIXME this actually fails in the case of XXXthe-XXX, let's care about that
+		# when we actually come across it
+		my $the = $fname;
+		$the =~ s/the-//g;
+		if ($the =~ /-/) {
+			$acro = join('', map { uc(substr($_, 0, 1)) } split(/-/, $the ));
+		} else {
+			$acro = (split(/\./, $the))[0]
+		}
+		if (!defined $acros{$acro}) {
+			$acros{$acro} = $fname;
+			$revacros{$fname} = $acro;
+		} else {
+			print STDERR "Trying to redefined acronym $acro from $acros{$acro} to ${fname}\n";
+		}
 	}
-	if (!defined $acros{$acro}) {
-		$acros{$acro} = $fname;
-	} else {
-		print STDERR "Trying to redefined acronym $acro from $acros{$acro} to ${fname}\n";
-	}
+
+	close FILE;
 }
-
-my %revacros = reverse %acros;
-
-close FILE;
 
 
 # params: img, width, height, font-size, text
@@ -216,6 +217,8 @@ sub make_svg(%) {
 }
 
 my %p;
+
+load_sizes();
 
 while (my $q = new CGI::Fast) {
 
